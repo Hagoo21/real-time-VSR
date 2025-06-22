@@ -1,0 +1,3 @@
+[submodule "chaplin"]
+	path = chaplin
+	url = https://github.com/Hagoo21/chaplin.git
