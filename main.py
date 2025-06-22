@@ -6,63 +6,8 @@ import sys
 import tempfile
 import time
 
-# Import mouth extraction components for display purposes
-import mediapipe as mp
-
-class MouthExtractor:
-    def __init__(self):
-        # Initialize mediapipe face mesh for display purposes
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            min_detection_confidence=0.7,
-            min_tracking_confidence=0.7
-        )
-        
-        # Lip landmark definitions
-        self.lip_indexes = [
-            61, 146, 91, 181, 84, 17, 314, 405, 321, 375,
-            291, 185, 40, 39, 37, 0, 267, 269, 270, 409,
-            415, 310, 311, 312, 13, 82, 81, 80, 191
-        ]
-    
-    def extract_mouth_region(self, frame):
-        """Extract mouth region from frame for display purposes"""
-        if frame is None:
-            return None
-            
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.face_mesh.process(frame_rgb)
-        
-        if not results.multi_face_landmarks:
-            return None
-            
-        h, w, _ = frame.shape
-        landmarks = results.multi_face_landmarks[0]
-        
-        # Get lip landmarks
-        lip_points = []
-        for i in self.lip_indexes:
-            x = int(landmarks.landmark[i].x * w)
-            y = int(landmarks.landmark[i].y * h)
-            lip_points.append((x, y))
-        
-        # Calculate bounding box for lips with padding
-        x_coords = [pt[0] for pt in lip_points]
-        y_coords = [pt[1] for pt in lip_points]
-        
-        x_min = max(min(x_coords) - 20, 0)
-        y_min = max(min(y_coords) - 20, 0)
-        x_max = min(max(x_coords) + 20, w)
-        y_max = min(max(y_coords) + 20, h)
-        
-        # Extract mouth region for display
-        mouth_crop = frame[y_min:y_max, x_min:x_max]
-        if mouth_crop.size == 0:
-            return None
-            
-        return mouth_crop
+# Import mouth extraction components
+from mouth_extractor import MouthExtractor
 
 def get_camera(index=0):
     """Get camera capture object"""
@@ -211,16 +156,22 @@ class ChaplinLipReader:
                     if self.recording and self.vsr_model:
                         self.frame_buffer.append(compressed_frame.copy())
                     
-                    # Extract mouth region for display purposes only
-                    mouth_region = self.mouth_extractor.extract_mouth_region(compressed_frame)
+                    # Extract mouth regions for all detected faces
+                    mouth_regions = self.mouth_extractor.extract_mouth_regions(compressed_frame)
                     
                     # Create display frame
                     display_frame = compressed_frame.copy()
                     
-                    # Show mouth region if detected
-                    if mouth_region is not None:
-                        mouth_display = cv2.resize(mouth_region, (150, 150))
-                        display_frame[10:160, 10:160] = mouth_display
+                    # Show all mouth regions if detected
+                    if mouth_regions:
+                        # Create mouth strip using the mouth_extractor's method
+                        mouths_strip = self.mouth_extractor.create_mouth_strip(mouth_regions)
+                        if mouths_strip is not None:
+                            strip_h, strip_w = mouths_strip.shape[:2]
+                            
+                            # Place the strip in the top-left corner of the display
+                            if strip_w <= display_frame.shape[1] - 20 and strip_h <= display_frame.shape[0] - 20:
+                                display_frame[10:10+strip_h, 10:10+strip_w] = mouths_strip
                     
                     # Show recording indicator
                     if self.recording:
@@ -232,13 +183,19 @@ class ChaplinLipReader:
                     if self.vsr_model:
                         buffer_text = f"Frames: {len(self.frame_buffer)}"
                         status_text = "Recording" if self.recording else "Ready"
-                        cv2.putText(display_frame, buffer_text, (10, 200), 
+                        faces_text = f"Faces detected: {len(mouth_regions)}"
+                        cv2.putText(display_frame, buffer_text, (10, display_frame.shape[0] - 80), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                        cv2.putText(display_frame, status_text, (10, 230), 
+                        cv2.putText(display_frame, status_text, (10, display_frame.shape[0] - 50), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        cv2.putText(display_frame, faces_text, (10, display_frame.shape[0] - 20), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
                     else:
-                        cv2.putText(display_frame, "Mouth extraction only", (10, 200), 
+                        faces_text = f"Faces detected: {len(mouth_regions)}"
+                        cv2.putText(display_frame, "Mouth extraction only", (10, display_frame.shape[0] - 50), 
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                        cv2.putText(display_frame, faces_text, (10, display_frame.shape[0] - 20), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
                     
                     cv2.imshow("CHAPLIN Lip Reader", display_frame)
                     last_frame_time = current_time
